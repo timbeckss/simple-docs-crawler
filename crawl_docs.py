@@ -10,9 +10,14 @@ Usage:
     python crawl_docs.py --url https://docs.example.com --prefix /api/v2
     python crawl_docs.py --url https://docs.example.com --depth 3 --out ./my-docs
     
-    # Sitemap mode (parses sitemap.xml and crawls all listed URLs)
+    # Sitemap mode (parses sitemap.xml from URL and crawls all listed URLs)
     python crawl_docs.py --url https://example.com/sitemap.xml --from-sitemap
     python crawl_docs.py --url https://example.com/sitemap.xml --from-sitemap --prefix /docs
+    
+    # Sitemap file mode (parses local sitemap.xml file and crawls all listed URLs)
+    python crawl_docs.py --sitemap-file ./sitemap.xml
+    python crawl_docs.py --sitemap-file ./sitemap.xml --url https://example.com
+    python crawl_docs.py --sitemap-file ./sitemap.xml --prefix /docs
     
     # Generate llms.txt index after crawling
     python crawl_docs.py --llms-txt
@@ -49,6 +54,9 @@ CONFIG = {
 
     # Parse URL as sitemap.xml and crawl all listed URLs (ignores depth setting)
     "from_sitemap": False,
+
+    # Path to local sitemap.xml file (alternative to from_sitemap)
+    "sitemap_file": "",
 }
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -71,7 +79,16 @@ def parse_args():
                         help="Generate llms.txt index file after crawling")
     parser.add_argument("--from-sitemap", action="store_true", default=CONFIG["from_sitemap"],
                         help="Parse URL as sitemap.xml and crawl all listed URLs (depth is ignored)")
-    return parser.parse_args()
+    parser.add_argument("--sitemap-file", default=CONFIG["sitemap_file"],
+                        help="Path to local sitemap.xml file (alternative to --from-sitemap)")
+    
+    args = parser.parse_args()
+    
+    # Validation: --sitemap-file and --from-sitemap are mutually exclusive
+    if args.sitemap_file and args.from_sitemap:
+        parser.error("--sitemap-file and --from-sitemap cannot be used together")
+    
+    return args
 
 
 def make_url_filter(start_url: str, prefix: str):
@@ -90,9 +107,51 @@ def make_url_filter(start_url: str, prefix: str):
     return filter_fn
 
 
+def _parse_sitemap_xml(content: str) -> tuple[list[str], bool]:
+    """
+    Parse sitemap XML content and extract URLs.
+    
+    Supports:
+    - Standard sitemap.xml with <url><loc> entries
+    - Sitemap index files with <sitemap><loc> entries
+    
+    Args:
+        content: XML content as string
+        
+    Returns:
+        Tuple of (urls, is_index) where:
+        - urls: List of URLs found in the sitemap
+        - is_index: True if this is a sitemap index, False if regular sitemap
+        
+    Raises:
+        Exception: If XML cannot be parsed
+    """
+    try:
+        # Parse XML
+        root = ET.fromstring(content)
+        
+        # Handle namespace
+        namespace = {'sm': 'http://www.sitemaps.org/schemas/sitemap/0.9'}
+        
+        # Check if it's a sitemap index
+        sitemaps = root.findall('.//sm:sitemap/sm:loc', namespace)
+        if sitemaps:
+            # It's a sitemap index - extract sitemap URLs
+            sitemap_urls = [elem.text.strip() for elem in sitemaps if elem.text]
+            return sitemap_urls, True
+        
+        # It's a normal sitemap - extract page URLs
+        urls = root.findall('.//sm:url/sm:loc', namespace)
+        page_urls = [elem.text.strip() for elem in urls if elem.text]
+        return page_urls, False
+        
+    except Exception as e:
+        raise Exception(f"Failed to parse sitemap XML: {e}")
+
+
 async def parse_sitemap(sitemap_url: str) -> list[str]:
     """
-    Parse a sitemap.xml and extract all URLs.
+    Parse a sitemap.xml from a URL and extract all URLs.
     
     Supports:
     - Standard sitemap.xml with <url><loc> entries
@@ -117,23 +176,8 @@ async def parse_sitemap(sitemap_url: str) -> list[str]:
                     response.raise_for_status()
                     content = await response.text()
             
-            # Parse XML
-            root = ET.fromstring(content)
-            
-            # Handle namespace
-            namespace = {'sm': 'http://www.sitemaps.org/schemas/sitemap/0.9'}
-            
-            # Check if it's a sitemap index
-            sitemaps = root.findall('.//sm:sitemap/sm:loc', namespace)
-            if sitemaps:
-                # It's a sitemap index - extract sitemap URLs
-                sitemap_urls = [elem.text.strip() for elem in sitemaps if elem.text]
-                return sitemap_urls, True
-            
-            # It's a normal sitemap - extract page URLs
-            urls = root.findall('.//sm:url/sm:loc', namespace)
-            page_urls = [elem.text.strip() for elem in urls if elem.text]
-            return page_urls, False
+            # Use shared XML parsing function
+            return _parse_sitemap_xml(content)
             
         except Exception as e:
             raise Exception(f"Failed to fetch/parse sitemap {url}: {e}")
@@ -159,6 +203,61 @@ async def parse_sitemap(sitemap_url: str) -> list[str]:
     all_urls = list(dict.fromkeys(all_urls))
     
     return all_urls
+
+
+async def parse_sitemap_file(file_path: str) -> list[str]:
+    """
+    Parse a sitemap.xml from a local file and extract all URLs.
+    
+    Supports:
+    - Standard sitemap.xml with <url><loc> entries
+    - Sitemap index files with <sitemap><loc> entries (sub-sitemaps are fetched via HTTP)
+    
+    Args:
+        file_path: Path to the local sitemap.xml file
+        
+    Returns:
+        List of URLs found in the sitemap(s)
+        
+    Raises:
+        Exception: If file cannot be read or parsed
+    """
+    all_urls = []
+    
+    try:
+        # Read file from disk
+        content = Path(file_path).read_text(encoding='utf-8')
+        
+        # Parse XML content
+        urls, is_index = _parse_sitemap_xml(content)
+        
+        if is_index:
+            # It's a sitemap index - recursively fetch all sub-sitemaps via HTTP
+            print(f"📋 Found sitemap index with {len(urls)} sub-sitemaps")
+            for sub_sitemap_url in urls:
+                try:
+                    # Sub-sitemaps from index are URLs, fetch them via HTTP
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(sub_sitemap_url, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                            response.raise_for_status()
+                            sub_content = await response.text()
+                    
+                    sub_urls, _ = _parse_sitemap_xml(sub_content)
+                    all_urls.extend(sub_urls)
+                    print(f"   ✓ Loaded {len(sub_urls)} URLs from {sub_sitemap_url}")
+                except Exception as e:
+                    print(f"   ✗ Failed to load {sub_sitemap_url}: {e}")
+        else:
+            # It's a regular sitemap
+            all_urls = urls
+        
+        # Deduplicate URLs
+        all_urls = list(dict.fromkeys(all_urls))
+        
+        return all_urls
+        
+    except Exception as e:
+        raise Exception(f"Failed to read/parse sitemap file {file_path}: {e}")
 
 
 def url_to_filepath(url: str, base_url: str, output_dir: Path) -> Path:
@@ -287,15 +386,109 @@ async def crawl(args):
 
     output_dir = Path(args.out)
     output_dir.mkdir(parents=True, exist_ok=True)
-
-    parsed = urlparse(args.url)
-    domain = parsed.netloc
     
     saved = 0
     failed = 0
 
-    # ─── Sitemap Mode ────────────────────────────────────────────────────────────
-    if args.from_sitemap:
+    # ─── Sitemap File Mode ───────────────────────────────────────────────────────
+    if args.sitemap_file:
+        print(f"🔍 Sitemap File Mode: Parsing {args.sitemap_file}")
+        print(f"   Prefix filter: '{args.prefix or '(none)'}' | Output: {output_dir}")
+        print(f"   Note: --depth is ignored in sitemap file mode\n")
+        
+        try:
+            # Parse local sitemap file and extract URLs
+            urls = await parse_sitemap_file(args.sitemap_file)
+            
+            if not urls:
+                print(f"⚠️  Warning: No URLs found in sitemap file {args.sitemap_file}")
+                return
+            
+            print(f"📋 Found {len(urls)} URLs in sitemap file")
+            
+            # Apply prefix filter
+            if args.prefix:
+                urls_before = len(urls)
+                urls = [u for u in urls if urlparse(u).path.startswith(args.prefix)]
+                print(f"   Prefix filter: {urls_before} → {len(urls)} URLs")
+                if not urls:
+                    print(f"⚠️  Warning: No URLs match the prefix filter")
+                    return
+            
+            # Determine base URL and domain
+            if args.url:
+                # User provided explicit base URL
+                parsed = urlparse(args.url)
+                domain = parsed.netloc
+                base_url = args.url
+                print(f"   Using explicit base URL: {base_url}")
+                
+                # Apply domain filter when --url is explicitly set
+                urls_before_domain = len(urls)
+                urls = [u for u in urls if urlparse(u).netloc == domain]
+                
+                if not urls:
+                    print(f"⚠️  Warning: No URLs remain after domain filtering!")
+                    print(f"   Base domain: {domain}")
+                    print(f"   URL domains differ - consider adjusting --url\n")
+                    return
+                
+                if urls_before_domain != len(urls):
+                    print(f"   Domain filter: {urls_before_domain} → {len(urls)} URLs")
+            else:
+                # Auto-detect domain from first URL in sitemap
+                first_url = urlparse(urls[0])
+                domain = first_url.netloc
+                base_url = f"{first_url.scheme}://{first_url.netloc}"
+                print(f"   Auto-detected base URL: {base_url}")
+                print(f"   Note: No domain filtering applied (use --url to filter)")
+            
+            print(f"   Starting crawl of {len(urls)} URLs...\n")
+            
+            # Crawl each URL individually
+            config = CrawlerRunConfig(
+                excluded_selector=args.exclude,
+                remove_overlay_elements=True,
+            )
+            
+            async with AsyncWebCrawler() as crawler:
+                for i, url in enumerate(urls, 1):
+                    try:
+                        result = await crawler.arun(url=url, config=config)
+                        
+                        # arun returns a list, get the first result
+                        if isinstance(result, list) and len(result) > 0:
+                            result = result[0]
+                        
+                        if not result.success:
+                            print(f"  [{i}/{len(urls)}] ✗ Failed: {url}")
+                            failed += 1
+                            continue
+                        
+                        out_path = url_to_filepath(url, base_url, output_dir)
+                        out_path.parent.mkdir(parents=True, exist_ok=True)
+                        
+                        # Use fit_markdown if available (more compact for LLMs), else raw markdown
+                        content = getattr(result.markdown, "fit_markdown", None) or result.markdown
+                        out_path.write_text(str(content), encoding="utf-8")
+                        
+                        print(f"  [{i}/{len(urls)}] ✓ {url}")
+                        print(f"             → {out_path}")
+                        saved += 1
+                        
+                    except Exception as e:
+                        print(f"  [{i}/{len(urls)}] ✗ Error: {url}")
+                        print(f"             {e}")
+                        failed += 1
+        
+        except Exception as e:
+            print(f"❌ Error parsing sitemap file: {e}")
+            return
+    
+    # ─── Sitemap Mode (URL) ──────────────────────────────────────────────────────
+    elif args.from_sitemap:
+        parsed = urlparse(args.url)
+        domain = parsed.netloc
         print(f"🔍 Sitemap Mode: Parsing {args.url}")
         print(f"   Prefix filter: '{args.prefix or '(none)'}' | Output: {output_dir}")
         print(f"   Note: --depth is ignored in sitemap mode\n")
@@ -378,7 +571,10 @@ async def crawl(args):
             # Fall through to normal mode
     
     # ─── Normal Mode ─────────────────────────────────────────────────────────────
-    if not args.from_sitemap:
+    else:
+        parsed = urlparse(args.url)
+        domain = parsed.netloc
+        
         filters = [DomainFilter(allowed_domains=[domain])]
         if args.prefix:
             filters.append(URLPatternFilter(patterns=[f"*{args.prefix}*"]))

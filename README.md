@@ -4,9 +4,10 @@ Ein leistungsstarker Python-basierter Web-Crawler, der Dokumentations-Websites c
 
 ## Features
 
-✅ **Zwei Crawl-Modi:**
+✅ **Drei Crawl-Modi:**
 - **Normal-Modus**: Folgt Links auf der Website bis zu einer konfigurierbaren Tiefe (BFS-Strategie)
-- **Sitemap-Modus**: Parst `sitemap.xml` und crawlt alle aufgelisteten URLs direkt
+- **Sitemap-URL-Modus**: Parst `sitemap.xml` von einer URL und crawlt alle aufgelisteten URLs direkt
+- **Sitemap-File-Modus**: Parst lokale `sitemap.xml` Datei und crawlt alle aufgelisteten URLs
 
 ✅ **Intelligente Filterung:**
 - Domain-Filter (nur gleiche Domain)
@@ -78,10 +79,10 @@ python crawl_docs.py --url https://docs.example.com --out ./my-docs
 python crawl_docs.py --url https://docs.example.com --llms-txt
 ```
 
-### Sitemap-Modus
+### Sitemap-URL-Modus
 
 ```bash
-# Sitemap parsen und alle URLs crawlen
+# Sitemap von URL parsen und alle URLs crawlen
 python crawl_docs.py --url https://example.com/sitemap.xml --from-sitemap
 
 # Sitemap mit Präfix-Filter (nur URLs die mit /docs beginnen)
@@ -91,19 +92,48 @@ python crawl_docs.py --url https://example.com/sitemap.xml --from-sitemap --pref
 python crawl_docs.py --url https://example.com/sitemap.xml --from-sitemap --llms-txt
 ```
 
-**Hinweis:** Im Sitemap-Modus wird die `--depth` Option ignoriert, da alle URLs direkt aus der Sitemap extrahiert werden.
+**Hinweis:** Im Sitemap-URL-Modus wird die `--depth` Option ignoriert, da alle URLs direkt aus der Sitemap extrahiert werden.
+
+### Sitemap-File-Modus
+
+```bash
+# Lokale Sitemap-Datei parsen und crawlen
+python crawl_docs.py --sitemap-file ./sitemap.xml
+
+# Mit expliziter Base-URL (für Domain-Filter und Dateipfad-Generierung)
+python crawl_docs.py --sitemap-file ./sitemap.xml --url https://example.com
+
+# Mit Präfix-Filter (nur URLs die mit /docs beginnen)
+python crawl_docs.py --sitemap-file ./sitemap.xml --prefix /docs
+
+# Mit llms.txt Index-Generierung
+python crawl_docs.py --sitemap-file ./sitemap.xml --llms-txt
+
+# Vollständiges Beispiel mit allen Optionen
+python crawl_docs.py --sitemap-file ./my-sitemap.xml --url https://example.com --prefix /api --out ./api-docs --llms-txt
+```
+
+**Besonderheiten des Sitemap-File-Modus:**
+- `--url` ist **optional**. Wenn nicht gesetzt, wird die Domain automatisch aus der ersten URL in der Sitemap erkannt
+- Domain-Filter wird **nur** angewendet wenn `--url` explizit gesetzt ist
+- Unterstützt Sitemap-Index-Dateien (Sub-Sitemaps werden automatisch via HTTP geladen)
+- Die `--depth` Option wird ignoriert
+- **Nicht kombinierbar** mit `--from-sitemap`
 
 ### Alle Optionen
 
 ```
---url URL              Start-URL zum Crawlen
+--url URL              Start-URL zum Crawlen (optional bei --sitemap-file)
 --prefix PREFIX        Nur URLs mit diesem Pfad-Präfix crawlen
---depth DEPTH          Maximale Crawl-Tiefe (Standard: 5)
---out OUTPUT_DIR       Output-Verzeichnis (Standard: ./remnote-docs)
+--depth DEPTH          Maximale Crawl-Tiefe (Standard: 5, ignoriert bei Sitemap-Modi)
+--out OUTPUT_DIR       Output-Verzeichnis (Standard: ./docs)
 --exclude SELECTORS    CSS-Selektoren zum Entfernen (z.B. "nav, footer")
 --llms-txt             llms.txt Index-Datei generieren
---from-sitemap         Sitemap-Modus aktivieren
+--from-sitemap         Sitemap-URL-Modus aktivieren (parst sitemap.xml von URL)
+--sitemap-file PATH    Sitemap-File-Modus aktivieren (parst lokale sitemap.xml Datei)
 ```
+
+**Hinweis:** `--from-sitemap` und `--sitemap-file` können nicht zusammen verwendet werden.
 
 ## Konfiguration
 
@@ -111,34 +141,51 @@ Die Standard-Konfiguration kann in [`crawl_docs.py`](crawl_docs.py:24) angepasst
 
 ```python
 CONFIG = {
-    "url": "https://plugins.remnote.com/sitemap.xml",
+    "url": "",
     "url_prefix": "",
     "max_depth": 5,
-    "output_dir": "./remnote-docs",
+    "output_dir": "./docs",
     "excluded_selectors": "nav, footer, .sidebar, .navbar, header, .toc, [role='navigation']",
     "generate_llms_txt": True,
     "from_sitemap": False,
+    "sitemap_file": "",
 }
 ```
 
 ## Beispiele
 
-### Beispiel 1: RemNote Plugin Dokumentation
+### Beispiel 1: RemNote Plugin Dokumentation (Sitemap-URL)
 
 ```bash
 python crawl_docs.py --url https://plugins.remnote.com/sitemap.xml --from-sitemap --llms-txt
 ```
 
-### Beispiel 2: Nur API-Dokumentation crawlen
+### Beispiel 2: Lokale Sitemap-Datei verwenden
+
+```bash
+python crawl_docs.py --sitemap-file ./my-sitemap.xml --llms-txt
+```
+
+### Beispiel 3: Lokale Sitemap mit expliziter Base-URL
+
+```bash
+python crawl_docs.py --sitemap-file ./sitemap.xml --url https://example.com --prefix /docs
+```
+
+### Beispiel 4: Nur API-Dokumentation crawlen (Normal-Modus)
 
 ```bash
 python crawl_docs.py --url https://docs.example.com --prefix /api/v2 --depth 3
 ```
 
-### Beispiel 3: Mehrere Sitemaps (Sitemap-Index)
+### Beispiel 5: Mehrere Sitemaps (Sitemap-Index)
 
 ```bash
+# Von URL
 python crawl_docs.py --url https://example.com/sitemap_index.xml --from-sitemap
+
+# Von lokaler Datei
+python crawl_docs.py --sitemap-file ./sitemap_index.xml
 ```
 
 ## Output-Struktur
@@ -176,7 +223,9 @@ Wenn `--llms-txt` aktiviert ist, wird eine strukturierte Index-Datei generiert:
 - [RemType](https://plugins.remnote.com/api/enums/RemType): Rem type enumeration (local: ./api/enums/RemType/index.md)
 ```
 
-## Sitemap-Modus: Technische Details
+## Sitemap-Modi: Technische Details
+
+Beide Sitemap-Modi (URL und File) unterstützen die gleichen XML-Formate und verwenden die gleiche Parsing-Logik.
 
 ### Unterstützte Sitemap-Formate
 
@@ -209,11 +258,19 @@ Wenn `--llms-txt` aktiviert ist, wird eine strukturierte Index-Datei generiert:
 
 ### Verarbeitung
 
+**Sitemap-URL-Modus (`--from-sitemap`):**
 1. **Sitemap Fetching**: HTTP-Request mit `aiohttp`
-2. **XML-Parsing**: Verwendung von `xml.etree.ElementTree`
-3. **Sitemap-Index-Erkennung**: Automatisch erkannt und rekursiv verarbeitet
+2. **XML-Parsing**: Verwendung von `xml.etree.ElementTree` (via `_parse_sitemap_xml()`)
+3. **Sitemap-Index-Erkennung**: Automatisch erkannt und Sub-Sitemaps rekursiv via HTTP geladen
 4. **URL-Filterung**: Domain- und Präfix-Filter angewendet
-5. **Crawling**: Jede URL wird einzeln gecrawlt (depth=1)
+5. **Crawling**: Jede URL wird einzeln gecrawlt
+
+**Sitemap-File-Modus (`--sitemap-file`):**
+1. **Datei Lesen**: Lokale XML-Datei von Disk einlesen
+2. **XML-Parsing**: Verwendung von `xml.etree.ElementTree` (via `_parse_sitemap_xml()`)
+3. **Sitemap-Index-Erkennung**: Automatisch erkannt, Sub-Sitemaps werden via HTTP geladen
+4. **URL-Filterung**: Präfix-Filter immer, Domain-Filter nur bei `--url`
+5. **Crawling**: Jede URL wird einzeln gecrawlt
 
 ### Fehlerbehandlung
 
@@ -224,14 +281,16 @@ Wenn `--llms-txt` aktiviert ist, wird eine strukturierte Index-Datei generiert:
 
 ## Modi-Vergleich
 
-| Feature | Normal-Modus | Sitemap-Modus |
-|---------|--------------|---------------|
-| URL-Quelle | Link-Following | sitemap.xml |
-| Depth | Konfigurierbar | Ignoriert (immer 1) |
-| Präfix-Filter | ✅ Unterstützt | ✅ Unterstützt |
-| Domain-Filter | ✅ Unterstützt | ✅ Unterstützt |
-| Use Case | Explorative Discovery | Vollständige Abdeckung |
-| Performance | Abhängig von Depth | Schneller (direkte URLs) |
+| Feature | Normal-Modus | Sitemap-URL-Modus | Sitemap-File-Modus |
+|---------|--------------|-------------------|-------------------|
+| URL-Quelle | Link-Following | sitemap.xml (URL) | sitemap.xml (lokal) |
+| Depth | Konfigurierbar | Ignoriert | Ignoriert |
+| Präfix-Filter | ✅ Unterstützt | ✅ Unterstützt | ✅ Unterstützt |
+| Domain-Filter | ✅ Immer aktiv | ✅ Immer aktiv | ⚡ Nur bei `--url` |
+| Base-URL | Erforderlich (`--url`) | Erforderlich (`--url`) | Optional (auto-detect) |
+| Use Case | Explorative Discovery | Vollständige Abdeckung | Offline/Lokal |
+| Performance | Abhängig von Depth | Schnell (direkte URLs) | Schnell (direkte URLs) |
+| Sitemap-Index | N/A | ✅ Unterstützt | ✅ Unterstützt |
 
 ## Troubleshooting
 
