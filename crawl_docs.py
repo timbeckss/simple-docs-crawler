@@ -308,19 +308,31 @@ async def crawl(args):
                 print(f"⚠️  Warning: No URLs found in sitemap {args.url}")
                 return
             
-            print(f"📋 Found {len(urls)} URLs in sitemap\n")
+            print(f"📋 Found {len(urls)} URLs in sitemap")
             
             # Apply prefix filter
             if args.prefix:
                 urls_before = len(urls)
                 urls = [u for u in urls if urlparse(u).path.startswith(args.prefix)]
-                print(f"   Filtered to {len(urls)} URLs matching prefix '{args.prefix}'\n")
+                print(f"   Prefix filter: {urls_before} → {len(urls)} URLs\n")
                 if not urls:
                     print(f"⚠️  Warning: No URLs match the prefix filter")
                     return
             
             # Apply domain filter
+            urls_before_domain = len(urls)
             urls = [u for u in urls if urlparse(u).netloc == domain]
+            
+            if not urls:
+                print(f"⚠️  Warning: No URLs remain after domain filtering!")
+                print(f"   Sitemap domain: {domain}")
+                print(f"   URL domains differ - consider using the correct sitemap URL\n")
+                return
+            
+            if urls_before_domain != len(urls):
+                print(f"   Domain filter: {urls_before_domain} → {len(urls)} URLs")
+            
+            print(f"   Starting crawl of {len(urls)} URLs...\n")
             
             # Crawl each URL individually
             config = CrawlerRunConfig(
@@ -348,14 +360,15 @@ async def crawl(args):
                         
                         # Use fit_markdown if available (more compact for LLMs), else raw markdown
                         content = getattr(result.markdown, "fit_markdown", None) or result.markdown
-                        out_path.write_text(content, encoding="utf-8")
+                        out_path.write_text(str(content), encoding="utf-8")
                         
                         print(f"  [{i}/{len(urls)}] ✓ {url}")
                         print(f"             → {out_path}")
                         saved += 1
                         
                     except Exception as e:
-                        print(f"  [{i}/{len(urls)}] ✗ Error crawling {url}: {e}")
+                        print(f"  [{i}/{len(urls)}] ✗ Error: {url}")
+                        print(f"             {e}")
                         failed += 1
         
         except Exception as e:
