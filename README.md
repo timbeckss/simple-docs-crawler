@@ -29,7 +29,7 @@ A Python-based web crawler that downloads documentation websites and converts th
 ### 1. Clone the Repository
 
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/timbeckss/simple-docs-crawler.git
 cd simple-docs-crawler
 ```
 
