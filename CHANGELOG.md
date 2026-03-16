@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-03-16
+
 ### Added
 - **Local Sitemap File Feature**: New `--sitemap-file` option to parse local `.xml` sitemap files
   - Supports both standard sitemaps and sitemap index files
@@ -16,13 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New internal function `_parse_sitemap_xml()` for shared XML parsing logic
 - New function `parse_sitemap_file()` for local sitemap processing
 - Validation: `--sitemap-file` and `--from-sitemap` are mutually exclusive
+- Three crawl modes now available: Normal, Sitemap-URL, Sitemap-File
 
 ### Changed
 - Refactored: Extracted XML parsing logic from `parse_sitemap()` for better code reusability
 - Improved error handling in sitemap modes
 - Updated CLI help and documentation
+- Base URL can now be explicitly set or automatically detected
+- Flexible domain filtering depending on crawl mode
 
-### Technical Details
-- Three crawl modes now available: Normal, Sitemap-URL, Sitemap-File
-- Base URL can be explicitly set or automatically detected
-- Flexible domain filtering depending on mode
+[0.1.0]: https://github.com/username/crawl4ai-project/releases/tag/v0.1.0

@@ -1,6 +1,6 @@
-# Universal Documentation Crawler
+# Simple Documentation Crawler
 
-A powerful Python-based web crawler that downloads documentation websites and converts them into clean, LLM-optimized Markdown files.
+A Python-based web crawler that downloads documentation websites and converts them into clean, LLM-optimized Markdown files.
 
 ## Features
 
@@ -30,7 +30,7 @@ A powerful Python-based web crawler that downloads documentation websites and co
 
 ```bash
 git clone <your-repo-url>
-cd crawl-docs
+cd simple-docs-crawler
 ```
 
 ### 2. Create Virtual Environment (Recommended)
@@ -39,7 +39,7 @@ cd crawl-docs
 python -m venv .venv
 
 # Windows
-.venv\Scripts\activate
+.venv\Scripts\Activate.ps1
 
 # Linux/macOS
 source .venv/bin/activate
